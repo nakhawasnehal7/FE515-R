@@ -1,0 +1,441 @@
+---
+title: "FE515 Lecture 3: Live Market Data and Option Liquidity in R"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+fontsize: 11pt
+geometry: margin=1in
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 7,
+  fig.height = 4.5
+)
+```
+
+# Class goal
+
+In the previous lecture, we worked with financial data that had already been saved in a file. Today we will extend that workflow by downloading market data directly into R and then using a live option chain to study liquidity.
+
+The main question for today is:
+
+> **How can we use R to download market data directly and identify where an option market is most liquid?**
+
+By the end of the walkthrough, we will be able to:
+
+- install and load the `quantmod` package;
+- download historical equity prices directly into R;
+- reproduce a short version of last lecture's return analysis;
+- download and inspect an option chain;
+- interpret bid, ask, volume, open interest, and moneyness;
+- calculate absolute and relative bid-ask spreads;
+- identify contracts with the tightest spreads;
+- compare liquidity for in-the-money and out-of-the-money options.
+
+# Install and load `quantmod`
+
+R includes many built-in functions, but specialized packages add additional tools. For this lecture we will use `quantmod`, which contains functions for downloading and working with financial market data.
+
+You only need to **install** a package once on a computer. You need to **load** the package each time you start a new R session.
+
+```{r packages}
+# Run this once if quantmod is not already installed:
+#install.packages("quantmod")
+
+library(quantmod)
+```
+
+The main functions we will use today are:
+
+- `getSymbols()` for historical market data;
+- `getQuote()` for a current quote;
+- `getOptionChain()` for option-chain data.
+
+# Download equity data directly into R
+
+Suppose we want to study Apple stock. Instead of downloading a CSV file manually, we can ask R to retrieve the data for us.
+
+```{r download-equity}
+ticker <- "AAPL"
+start_date <- "2024-01-01"
+
+getSymbols(
+  Symbols = ticker,
+  from = start_date,
+  to = Sys.Date()
+)
+```
+
+By default, `getSymbols()` creates an object with the same name as the ticker. Since we downloaded Apple, R created an object called `AAPL`.
+
+```{r inspect-equity}
+head(AAPL)
+tail(AAPL)
+```
+
+The columns contain:
+
+- **Open**: first traded price of the day;
+- **High**: highest traded price of the day;
+- **Low**: lowest traded price of the day;
+- **Close**: final traded price of the day;
+- **Volume**: number of shares traded;
+- **Adjusted**: closing price adjusted for events such as stock splits and dividends.
+
+For historical return calculations, the adjusted price is generally the most useful column because it better represents the return earned by an investor.
+
+We can extract it with `Ad()`.
+
+```{r adjusted-price}
+aapl_price <- Ad(AAPL)
+head(aapl_price)
+```
+
+We can also quickly visualize the downloaded data.
+
+```{r equity-chart}
+chartSeries(
+  AAPL,
+  theme = chartTheme("white"),
+  TA = NULL,
+  name = "AAPL Historical Price"
+)
+```
+
+# Brief review of last lecture
+
+Last lecture, once we had a price series, we calculated returns and summarized performance. We can now repeat the same analysis using data downloaded directly from the market.
+
+A simple return from day $t-1$ to day $t$ is
+
+$$
+R_t = \frac{P_t}{P_{t-1}} - 1.
+$$
+
+In R:
+
+```{r returns}
+aapl_returns <- aapl_price / lag(aapl_price) - 1
+aapl_returns <- na.omit(aapl_returns)
+
+head(aapl_returns)
+```
+
+We can summarize the daily return series.
+
+```{r return-summary}
+mean_daily_return <- mean(aapl_returns)
+daily_volatility <- sd(aapl_returns)
+
+mean_daily_return
+daily_volatility
+```
+
+If we use approximately 252 trading days per year,
+
+$$
+\text{Annualized Mean Return} \approx 252\bar{R}_{daily},
+$$
+
+and
+
+$$
+\text{Annualized Volatility} \approx \sqrt{252}\,\sigma_{daily}.
+$$
+
+```{r annualized-summary}
+annualized_return <- mean_daily_return * 252
+annualized_volatility <- daily_volatility * sqrt(252)
+
+annualized_return
+annualized_volatility
+```
+
+This should look familiar. The important new idea is that **R can now obtain the market data and analyze it in the same workflow**.
+
+From here, we move to a new type of market data.
+
+# Download a live option chain
+
+An option is a contract whose value depends on an underlying asset.
+
+A **call option** gives the holder the right, but not the obligation, to buy the underlying asset at a fixed strike price.
+
+A **put option** gives the holder the right, but not the obligation, to sell the underlying asset at a fixed strike price.
+
+We will download Apple's option chain.
+
+```{r option-chain-download}
+option_symbol <- "AAPL"
+
+option_data <- tryCatch(
+  getOptionChain(option_symbol, NULL),
+  error = function(e) {
+    message("Option-chain download failed. Try again later or use another ticker.")
+    return(NULL)
+  }
+)
+```
+
+
+If the download succeeds, `option_data` contains the available expiration dates.
+
+```{r option-expirations}
+if (!is.null(option_data)) {
+  names(option_data)
+}
+```
+
+This is our first important structural difference from the equity data. An option chain contains several layers:
+
+$$
+\text{Ticker}
+\rightarrow
+\text{Expiration Date}
+\rightarrow
+\{\text{Calls},\text{Puts}\}
+\rightarrow
+\text{Individual Contracts}.
+$$
+
+# Inspect one expiration date
+
+Very short-dated options can sometimes have unusual spreads or very little time remaining. For this walkthrough, we will select the first expiration that is at least thirty days away when possible.
+
+```{r select-expiration}
+if (!is.null(option_data)) {
+  expiration_names <- names(option_data)
+  expiration_dates <- as.Date(expiration_names, format = "%b.%d.%Y")
+
+  valid_expirations <- which(expiration_dates >= Sys.Date() + 30)
+
+  if (length(valid_expirations) > 0) {
+    selected_index <- valid_expirations[1]
+  } else {
+    selected_index <- 1
+  }
+
+  selected_expiration <- expiration_names[selected_index]
+  selected_expiration
+
+  chain <- option_data[[selected_expiration]]
+  names(chain)
+}
+```
+
+Each expiration generally contains one data frame for calls and one for puts.
+
+```{r inspect-calls-puts}
+if (!is.null(option_data)) {
+  head(chain$calls)
+  head(chain$puts)
+}
+```
+
+Some of the most useful columns are:
+
+- **Strike**: exercise price of the option;
+- **Bid**: highest price currently offered by a buyer;
+- **Ask**: lowest price currently offered by a seller;
+- **Vol**: recent trading volume;
+- **OI**: open interest, or the number of currently outstanding contracts;
+- **IV**: implied volatility;
+- **ITM**: whether the contract is currently in the money.
+
+**Discussion question:** Why might an option have a very different bid and ask even when both quotes refer to the same contract?
+
+# Measure the bid-ask spread
+
+The bid-ask spread is one of the simplest measures of trading cost and market liquidity.
+
+The **absolute spread** is
+
+$$
+\text{Spread} = \text{Ask} - \text{Bid}.
+$$
+
+However, comparing absolute spreads across contracts can be misleading. A $1 spread on a $100 option is very different from a $1 spread on a $2 option.
+
+We therefore also calculate the midpoint
+
+$$
+\text{Mid} = \frac{\text{Bid} + \text{Ask}}{2}
+$$
+
+and the **relative spread**
+
+$$
+\text{Relative Spread}
+=
+\frac{\text{Ask} - \text{Bid}}
+{\text{Mid}}.
+$$
+
+A smaller relative spread generally indicates a tighter, more liquid market.
+
+```{r spread-calculation}
+if (!is.null(option_data)) {
+  calls <- chain$calls
+
+  calls$Mid <- 0.5 * (calls$Bid + calls$Ask)
+  calls$Spread <- calls$Ask - calls$Bid
+  calls$RelativeSpread <- calls$Spread / calls$Mid
+
+  head(calls)
+}
+```
+
+Some contracts may not have a usable two-sided quote. For this analysis, we will keep contracts with positive bid and ask prices and a finite relative spread.
+
+```{r clean-option-data}
+if (!is.null(option_data)) {
+  calls_clean <- calls[
+    calls$Bid > 0 &
+    calls$Ask > 0 &
+    is.finite(calls$RelativeSpread),
+  ]
+
+  head(calls_clean)
+}
+```
+
+Now we can identify the contract with the tightest relative spread.
+
+```{r tightest-spread}
+if (!is.null(option_data) && nrow(calls_clean) > 0) {
+  tightest_index <- which.min(calls_clean$RelativeSpread)
+
+  columns_to_show <- intersect(
+    c("Strike", "Bid", "Ask", "Mid", "Spread", "RelativeSpread", "Vol", "OI", "IV", "ITM"),
+    names(calls_clean)
+  )
+
+  calls_clean[tightest_index, columns_to_show, drop = FALSE]
+}
+```
+
+# ITM versus OTM liquidity
+
+To classify call options as in the money or out of the money, we first need the current stock price.
+
+```{r current-quote}
+quote_data <- tryCatch(
+  getQuote(option_symbol),
+  error = function(e) NULL
+)
+
+if (!is.null(quote_data)) {
+  spot <- as.numeric(quote_data$Last[1])
+} else {
+  # Fallback if the live quote request fails
+  spot <- as.numeric(last(Cl(AAPL)))
+}
+
+spot
+```
+
+For a call option:
+
+$$
+K < S \Rightarrow \text{ITM},
+$$
+
+$$
+K > S \Rightarrow \text{OTM},
+$$
+
+where $K$ is the strike price and $S$ is the current stock price.
+
+We will create our own moneyness label.
+
+```{r moneyness}
+if (!is.null(option_data) && nrow(calls_clean) > 0) {
+  calls_clean$Moneyness <- ifelse(
+    calls_clean$Strike < spot,
+    "ITM",
+    ifelse(calls_clean$Strike > spot, "OTM", "ATM")
+  )
+
+  table(calls_clean$Moneyness)
+}
+```
+
+Now compare the typical relative spread across moneyness groups. We use the **median** because option spreads can contain very large outliers.
+
+```{r spread-by-moneyness}
+if (!is.null(option_data) && nrow(calls_clean) > 0) {
+  spread_by_moneyness <- aggregate(
+    RelativeSpread ~ Moneyness,
+    data = calls_clean,
+    FUN = median,
+    na.rm = TRUE
+  )
+
+  spread_by_moneyness
+}
+```
+
+# Visualize option liquidity across strikes
+
+A table tells us which contract has the smallest spread, but a graph makes it easier to see how liquidity changes across the entire option chain.
+
+```{r liquidity-plot}
+if (!is.null(option_data) && nrow(calls_clean) > 0) {
+  plot(
+    calls_clean$Strike,
+    calls_clean$RelativeSpread,
+    xlab = "Strike Price",
+    ylab = "Relative Bid-Ask Spread",
+    main = paste("AAPL Call Liquidity:", selected_expiration),
+    pch = 19
+  )
+
+  abline(v = spot, lty = 2, lwd = 2)
+
+  legend(
+    "topleft",
+    legend = paste("AAPL Price =", round(spot, 2)),
+    lty = 2,
+    lwd = 2
+  )
+}
+```
+
+The dashed vertical line marks the current stock price. Strikes to the left are generally ITM calls and strikes to the right are generally OTM calls.
+
+We can also compare the distribution of relative spreads directly.
+
+```{r liquidity-boxplot}
+if (!is.null(option_data) && nrow(calls_clean) > 0) {
+  boxplot(
+    RelativeSpread ~ Moneyness,
+    data = calls_clean,
+    xlab = "Moneyness",
+    ylab = "Relative Bid-Ask Spread",
+    main = "Option Liquidity by Moneyness"
+  )
+}
+```
+
+# Key takeaways
+
+By the end of this walkthrough, we have used R to move through a complete market-data workflow:
+
+1. Load a financial-data package.
+2. Download equity prices directly into R.
+3. Reproduce familiar return calculations without importing a CSV file.
+4. Download a live option chain.
+5. Inspect nested market-data structures.
+6. Calculate bid-ask midpoints and spreads.
+7. Compare liquidity using spread.
+8. Classify options by moneyness.
+9. Compare ITM and OTM option liquidity.
+10. Visualize where option-market liquidity is concentrated.
+
+The main lesson is that R is not only a tool for analyzing a dataset after it has been prepared. It can also be used to **retrieve, inspect, clean, and analyze live financial market data in one workflow**.

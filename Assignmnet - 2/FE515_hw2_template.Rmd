@@ -1,0 +1,169 @@
+---
+title: "FE515 2022A Assignment 2"
+author: "Snehal"
+date: "9th Oct 2026"
+output: pdf_document
+---
+
+
+
+## 1.1 
+
+# Question 1
+
+## 1.1 Read data and convert first column to Date
+
+The first column in the provided CSV is a row index, not calendar dates. If your original `JPM.csv` has real dates, this works unchanged.
+1.1 Find the attached JPM.csv file. Use as.Date() function to change the
+first column to Date object.
+
+```{r}
+jpm <- read.csv("FE515_hw2_JPM.csv") 
+
+# adjust path if needed
+jpm[, 1] <- as.Date(jpm[, 1])          
+colnames(jpm)[1] <- "Date"
+head(jpm)
+```
+
+## 1.2
+
+1.2 Plot the adjusted close price against the date object (i.e. date object as
+x-axis and close price as y-axis) in red line (require no points). Set the
+title as JPM, the label for x-axis as Date and the label for y-axis as
+Adjusted Close Price.
+```{r}
+plot(jpm$Date, jpm$JPM.Adjusted, type = "l", col = "red",
+     main = "JPM", xlab = "Date", ylab = "Adjusted Close Price")
+```
+
+## 1.3 
+1.3 Create a scatter plot of close price against open price (i.e. open prices as
+x-axis, and close prices as y-axis). Set the x label as ”Open Price” and y
+label as ”Close Price”.
+```{r}
+plot(jpm$JPM.Open, jpm$JPM.Close,
+     xlab = "Open Price", ylab = "Close Price")
+```
+
+## 1.4 
+
+1.4 Use cut() function to divide adjusted close price into 4 intervals. Generate
+a barplot for the frequencies of these intervals.
+
+```{r}
+adj_int <- cut(jpm$JPM.Adjusted, breaks = 4)
+barplot(table(adj_int), xlab = "Adjusted Close Interval", ylab = "Frequency")
+```
+
+## 1.5
+1.5 Generate a boxplot of volume against the 4 intervals of adjusted close
+prices.
+
+```{r}
+boxplot(jpm$JPM.Volume ~ adj_int,
+        xlab = "Adjusted Close Interval", ylab = "Volume")
+```
+
+## 1.6
+1.6 Use par() function to create a picture of 4 subplots. Gather the 4 figures
+from 1.2- 1.5 into ONE single picture. Please arrange the 4 subplots
+into a 2 by 2 frame, i.e. a frame consists of 2 columns and 2 rows. 
+
+```{r}
+par(mfrow = c(2, 2))
+plot(jpm$Date, jpm$JPM.Adjusted, type = "l", col = "red",
+     main = "JPM", xlab = "Date", ylab = "Adjusted Close Price")
+plot(jpm$JPM.Open, jpm$JPM.Close,
+     xlab = "Open Price", ylab = "Close Price")
+barplot(table(adj_int), xlab = "Adjusted Close Interval", ylab = "Frequency")
+boxplot(jpm$JPM.Volume ~ adj_int,
+        xlab = "Adjusted Close Interval", ylab = "Volume")
+par(mfrow = c(1, 1))
+```
+
+# Question 2
+
+
+Estimate the volume of the unit sphere (which is just $\frac{4\pi}{3}$) by simulation.
+we draw N points from three dimensional uniform distribution. In a 3-D co
+ordinate system, the position for the points inside the 1/8 unit sphere is given
+by
+$$
+x^2 + y^2 + z^2 \leq 1, \quad x, y, z \geq 0.
+$$
+
+$$
+\text{volume of } \frac{1}{8} \text{ unit sphere} = \frac{\text{number of inner points}}{\text{number of total points}} \times 1
+$$
+
+Then we have the volume of the unit sphere.
+
+$$
+\text{volume of unit sphere} = 8 \times \text{volume of } \frac{1}{8} \text{ unit sphere}
+$$
+
+We can use the frequency of inner points to estimate the volume of 1/8
+sphere.
+
+```{r}
+set.seed(515)
+N <- 1e6
+x <- runif(N); y <- runif(N); z <- runif(N)
+inner <- sum(x^2 + y^2 + z^2 <= 1)
+
+vol_eighth <- inner / N * 1      # eq. (2)
+vol_sphere <- 8 * vol_eighth     # eq. (3)
+
+cat("Estimated volume:", vol_sphere, "\n")
+cat("True volume     :", 4 * pi / 3, "\n")
+```
+
+
+# Question 3
+3.1
+Implement a Linear Congruential Generator (LCG)
+$$
+X_{n+1} = (a X_n + b) \bmod m
+$$
+which generates pseudo-random number from uniform distribution using
+m = 244944,a = 1597,b = 51749. (Hint. See details in lecture 5 and
+example codes.)
+
+```{r}
+seed <- 1   # seed in global environment
+
+LCG <- function(n){
+  m <- 244944
+  a <- 1597
+  b <- 51749
+  x <- rep(NA, n)
+  x[1] <- (a * seed + b) %% m
+  for(i in 1:(n-1)){
+    x[i + 1] <- (a * x[i] + b) %% m
+  }
+  seed <<- x[n]       
+  return(x/m)          
+}
+```
+
+
+## 3.2 Chi-square (df = 10) sample
+3.2 Use the LCG in the previous problem, generate 10000 random numbers
+from chi-square distribution with 10 degrees of freedom (i.e. df = 10),
+and assign to a variable.
+```{r}
+U <- LCG(10000)
+X <- qchisq(U, df = 10)
+
+summary(X)
+```
+
+
+## 3.3 Histogram with 40 bins
+ Visualize the resulting sample from 3.2 using a histogram with 40 bins
+
+```{r}
+hist(X, nclass = 40, main = "Chi-square (df = 10) via LCG", xlab = "X")
+```
+

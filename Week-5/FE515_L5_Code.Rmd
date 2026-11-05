@@ -1,0 +1,344 @@
+---
+title: "FE 515: Lecture 5 Walkthrough"
+subtitle: "Understanding Return Distributions"
+author: "Sean O'Leary"
+date: "October 1, 2026"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+  html_document:
+    toc: true
+    number_sections: true
+fontsize: 11pt
+geometry: margin=1in
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 3.7, fig.align = "center")
+```
+
+# Lecture Goal
+
+**What can a stock's historical returns tell us about its risk?**
+
+We will start with SPY, an ETF that tracks the S&P 500, and measure its average return, volatility, skewness, and kurtosis. At the end, we will bring in GLD, a gold ETF, to see how returns from two assets relate to one another.
+
+# Downloading the Data
+
+We can download both price histories directly with `getSymbols()`. We will use adjusted closing prices and begin in 2020.
+
+```{r download-data}
+# Install once if needed: install.packages("quantmod")
+library(quantmod)
+
+start_date <- "2020-01-01"
+spy <- getSymbols("SPY", from = start_date, auto.assign = FALSE)
+gld <- getSymbols("GLD", from = start_date, auto.assign = FALSE)
+
+prices <- na.omit(merge(Ad(spy), Ad(gld), join = "inner"))
+colnames(prices) <- c("SPY", "GLD")
+
+head(prices)
+```
+
+The adjusted closing price accounts for splits and, depending on the data provider, distributions. Since the two assets are now in one table, the dates are aligned for later comparisons.
+
+# From Prices to Returns
+
+## Simple Returns
+
+A price change of $5 is significant for a $50 stock but relatively small for a $500 stock. Returns put price changes on a comparable scale.
+
+The simple return is
+
+$$
+R_t = \frac{P_t-P_{t-1}}{P_{t-1}} = \frac{P_t}{P_{t-1}}-1.
+$$
+
+## Log Returns
+
+We can also measure the change in the *logarithm* of price:
+
+$$
+r_t=\ln\left(\frac{P_t}{P_{t-1}}\right)
+=\ln(P_t)-\ln(P_{t-1}).
+$$
+
+Log returns are useful because they add across time:
+
+$$
+r_1+r_2
+=\ln\left(\frac{P_1}{P_0}\right)
+ +\ln\left(\frac{P_2}{P_1}\right)
+=\ln\left(\frac{P_2}{P_0}\right).
+$$
+
+Simple returns instead compound through multiplication. For small daily changes, the two measures are close. We will use **log returns** to study SPY's distribution.
+
+```{r calculate-returns}
+simple_returns <- na.omit(prices / lag(prices, 1) - 1)
+log_returns <- na.omit(diff(log(prices)))
+
+head(cbind(simple_returns$SPY, log_returns$SPY))
+
+returns <- as.numeric(log_returns$SPY)
+```
+
+# Mean and Volatility
+
+## Average Return
+
+Suppose a daily return is a random variable $r$. Its population mean is
+
+$$
+\mu=\mathbb{E}[r].
+$$
+
+We do not know the true mean. We estimate it by averaging the observations:
+
+$$
+\bar r=\frac{1}{n}\sum_{t=1}^{n}r_t.
+$$
+
+In R, that is simply `mean()`.
+
+```{r average-return}
+mean_daily <- mean(returns)
+mean_annual <- 252 * mean_daily
+
+round(100 * c(Daily = mean_daily, Annualized = mean_annual), 2)
+```
+
+Multiplying by 252 converts the average daily **log return** to an annualized log-return figure. We use 252 as an approximate number of trading days per year.
+
+## Variance and Standard Deviation
+
+The average tells us where returns are centered, but not how much they fluctuate. Variance measures squared deviations from the mean:
+
+$$
+\sigma^2=\mathbb{E}\left[(r-\mu)^2\right].
+$$
+
+Why square the deviations? Without squaring, positive and negative deviations would offset each other. Squaring also gives larger moves more weight.
+
+For $n$ observations, the usual sample variance is
+
+$$
+s^2=\frac{1}{n-1}\sum_{t=1}^{n}(r_t-\bar r)^2.
+$$
+
+We divide by $n-1$ rather than $n$ to correct the usual downward bias that comes from estimating the mean using the same sample (under independent, identically distributed sampling).
+
+The standard deviation is $s=\sqrt{s^2}$. Unlike variance, it is expressed in the same units as returns. In finance, we usually call this **volatility**.
+
+```{r volatility}
+variance_daily <- var(returns)
+vol_daily <- sd(returns)
+vol_annual <- vol_daily * sqrt(252)
+
+round(c(Variance = variance_daily,
+        DailyVolatility = 100 * vol_daily,
+        AnnualizedVolatility = 100 * vol_annual), 4)
+```
+
+The volatility figures above are in percent; variance is not. The $\sqrt{252}$ scaling assumes daily returns have approximately constant variance and are uncorrelated.
+
+# Looking Beyond Mean and Variance
+
+Mean and volatility do not tell us everything about a return distribution. Two investments can have similar means and standard deviations, but one might experience more unusually large losses.
+
+We can study the shape of returns by looking at higher powers of their deviations from the sample mean. Variance uses the second power; skewness and kurtosis use the third and fourth.
+
+## Skewness: The Third Moment
+
+Variance squares the deviation from the mean, so a positive and a negative deviation of the same size contribute equally. **Cubing** the deviation preserves its sign. This lets us measure asymmetry in returns.
+
+We start with the average cubed deviation, then divide by the cube of the corresponding standard deviation so the result does not depend on the scale of returns:
+
+$$
+\boxed{
+\text{Skewness} =
+\frac{\displaystyle\frac{1}{n}\sum_{t=1}^{n}(r_t-\bar r)^3}
+{s^3}
+}
+$$
+
+Notice that the numerator is familiar from variance: we simply change the power from 2 to 3. The denominator standardizes the result. Here, both averages use $n$; this is the **unadjusted sample skewness**.
+
+- **Negative skewness:** unusually large negative deviations have more influence.
+- **Positive skewness:** unusually large positive deviations have more influence.
+
+A skewness of zero does not mean returns follow a normal distribution.
+
+## Kurtosis: The Fourth Moment
+
+Kurtosis follows the same idea, but we raise each deviation to the **fourth** power. Positive and negative deviations now both contribute positively, and extreme returns receive much greater weight. Doubling a deviation increases its contribution by $2^4=16$.
+
+To remove the scale of returns, divide by the fourth power of the corresponding standard deviation:
+
+$$
+\boxed{
+\text{Kurtosis} =
+\frac{\displaystyle\frac{1}{n}\sum_{t=1}^{n}(r_t-\bar r)^4}
+{s^4}
+}
+$$
+
+Again, this is the **unadjusted sample kurtosis**. A normal distribution has population kurtosis of 3, so we often report *excess kurtosis*, defined as kurtosis minus 3. High kurtosis indicates that extreme deviations play a larger role, but it does not distinguish large gains from large losses.
+
+We can calculate both measures from SPY returns using the same operations as in the formulas.
+
+```{r higher-moments}
+deviations <- returns - mean(returns)
+
+skewness <- mean(deviations^3) / mean(deviations^2)^(3/2)
+kurtosis <- mean(deviations^4) / mean(deviations^2)^2
+
+round(c(Skewness = skewness,
+        Kurtosis = kurtosis,
+        ExcessKurtosis = kurtosis - 3), 3)
+```
+
+Let's compare the distribution of observed returns to a normal curve with the same sample mean and standard deviation.
+
+```{r return-histogram}
+hist(returns, breaks = 100, probability = TRUE,
+     col = "gray90", border = "white",
+     main = "SPY Daily Log Returns",
+     xlab = "Daily log return")
+curve(dnorm(x, mean(returns), sd(returns)),
+      add = TRUE, col = "red", lwd = 2)
+legend("topright", "Normal distribution", col = "red", lwd = 2, bty = "n")
+```
+
+The normal curve gives us a useful benchmark. In particular, ask whether the observed returns appear to have more extreme observations than the curve would suggest.
+
+# Covariance: Comparing Two Assets
+
+Suppose an investor holds 60% SPY and 40% GLD. We can calculate each ETF's volatility, but **is the volatility of the portfolio simply 60% of one plus 40% of the other?**
+
+No. What matters is also whether the two investments tend to rise and fall **together**. If their returns do not always move in the same direction, combining them can reduce volatility. This is the reason to study covariance and correlation.
+
+## From Variance to Covariance
+
+We already know how to calculate the sample variance of asset A:
+
+$$
+s_A^2 = \frac{1}{n-1}\sum_{t=1}^{n}(R_{A,t}-\bar R_A)^2.
+$$
+
+We square each deviation by multiplying it **by itself**. Covariance makes one change: instead of multiplying by another deviation from asset A, we multiply by the corresponding deviation from asset B.
+
+$$
+\operatorname{Cov}(R_A,R_B)
+= \frac{1}{n-1}\sum_{t=1}^{n}
+(R_{A,t}-\bar R_A)(R_{B,t}-\bar R_B).
+$$
+
+Both formulas average products of deviations from the mean. Variance compares an asset to itself; covariance compares two assets. In fact, $\operatorname{Cov}(R_A,R_A)=s_A^2$ when calculated from the sample.
+
+When both returns are above their respective means, the product is positive. It is also positive when both are below their means. When one is above its mean and the other below, the product is negative.
+
+Because covariance depends on the volatility of each asset, we often report **correlation** instead:
+
+$$
+\operatorname{Corr}(R_A,R_B)
+=\frac{\operatorname{Cov}(R_A,R_B)}{s_A s_B},
+\qquad -1\leq\operatorname{Corr}(R_A,R_B)\leq 1.
+$$
+
+Correlation near 1 means strong positive linear comovement; near -1 means strong negative linear comovement; near 0 means little *linear* comovement.
+
+We will use **simple daily returns** of SPY and GLD, since simple portfolio returns are weighted averages of constituent simple returns.
+
+```{r covariance}
+spy_returns <- as.numeric(simple_returns$SPY)
+gld_returns <- as.numeric(simple_returns$GLD)
+
+round(c(VarianceSPY = var(spy_returns),
+        CovarianceSPYwithItself = cov(spy_returns, spy_returns),
+        CovarianceSPYGLD = cov(spy_returns, gld_returns),
+        CorrelationSPYGLD = cor(spy_returns, gld_returns)), 5)
+```
+
+## Why This Changes Portfolio Risk
+
+Suppose we invest **60% in SPY** and **40% in GLD**. The return on the portfolio depends on both assets, but what about its risk?
+
+We can collect the portfolio weights into a vector:
+
+$$
+\mathbf{w}=\begin{pmatrix}0.60\\0.40\end{pmatrix}.
+$$
+
+Next, collect the assets' variances and their covariance into a **covariance matrix**:
+
+$$
+\Sigma=\begin{pmatrix}
+s_A^2 & \operatorname{Cov}(R_A,R_B)\\
+\operatorname{Cov}(R_A,R_B) & s_B^2
+\end{pmatrix}.
+$$
+
+The diagonal entries measure each asset's own variance. The off-diagonal entries measure how the two assets move together. We need both to calculate portfolio risk.
+
+Using matrix multiplication, the sample variance of the portfolio is
+
+$$
+\boxed{s_p^2=\mathbf{w}^{\mathsf T}\Sigma\mathbf{w}.}
+$$
+
+This is the same calculation whether we hold two assets or twenty. Changing the weights changes how much each variance and covariance contributes to overall risk.
+
+Let's calculate the variance directly from the 60/40 portfolio returns and compare it with the matrix formula.
+
+```{r portfolio}
+# Put both daily simple-return series into one matrix
+asset_returns <- cbind(SPY = spy_returns, GLD = gld_returns)
+
+# Portfolio weights (60% SPY, 40% GLD)
+w <- c(0.60, 0.40)
+
+# Covariance matrix: variances on the diagonal, covariances off-diagonal
+Sigma <- cov(asset_returns)
+round(Sigma, 6)
+
+# Method 1: Calculate portfolio returns, then their variance
+portfolio_returns <- as.numeric(asset_returns %*% w)
+portfolio_variance <- var(portfolio_returns)
+
+# Method 2: Matrix formula, w' Sigma w
+portfolio_variance_matrix <- as.numeric(t(w) %*% Sigma %*% w)
+
+round(c(DirectVolatility = sqrt(portfolio_variance) * 100 * sqrt(252),
+        MatrixVolatility = sqrt(portfolio_variance_matrix) * 100 * sqrt(252)) , 2)
+
+# Compare annualized volatilities
+round(100 * sqrt(252) * c(
+  SPY = sd(spy_returns),
+  GLD = sd(gld_returns),
+  Portfolio = sd(portfolio_returns)
+), 2)
+```
+
+The two methods give the same variance. The comparison shows whether combining SPY and GLD reduced volatility over this historical sample. We assume daily rebalancing to the fixed 60/40 weights without transaction costs; annualizing with $\sqrt{252}$ assumes daily returns are approximately uncorrelated with constant variance.
+
+# Final Comparison
+
+We can now summarize the measures we computed for SPY.
+
+```{r summary-table}
+summary_table <- data.frame(
+  Measure = c("Mean daily log return (%)", "Mean annual log return (%)", "Daily volatility (%)",
+              "Annualized volatility (%)", "Skewness", "Kurtosis",
+              "Excess kurtosis"),
+  Value = round(c(100 * mean_daily, 100 * 252 * mean_daily, 100 * vol_daily, 100 * vol_annual,
+                  skewness, kurtosis, kurtosis - 3), 3)
+)
+summary_table
+```
+
+The mean describes the center of returns; volatility describes their dispersion. Skewness and kurtosis tell us more about the shape of the distribution. For a portfolio, we also need covariance: how the assets move together can change total risk.
+

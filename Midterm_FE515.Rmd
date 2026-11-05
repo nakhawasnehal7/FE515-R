@@ -1,0 +1,425 @@
+---
+title: "FE515- Midterm"
+author: "Snehal Nakhawa"
+date: "2026-10-16"
+output:
+  pdf_document:
+    toc: true
+    latex_engine: xelatex
+---
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 8, fig.height = 5)
+
+# install.packages(c("quantmod", "xts", "zoo", "knitr"))  # run once if needed
+library(quantmod)
+library(xts)
+library(zoo)
+library(knitr)
+
+set.seed(515)  # reproducible simulation
+```
+
+# Question 1
+
+1.1 Choose two stocks from the following list of tickers: AAPL, GOOGL,
+TSLA, NVDA, META, COST, UBER, NKE, NFLX.
+Download their daily adjusted closing prices from 2021-01-01 to 2026-03
+01 using R.
+
+I choose **NVDA** and **COST** (Costco). They differ a lot in character (high-growth semiconductor vs. defensive retailer), which makes the diversification questions more interesting.
+Yahoo's `to` date is exclusive, so I use 2026-03-02 to include 2026-03-01 (a Sunday, so the last trading day is Feb 27, 2026).
+
+```{r cars}
+start_date <- "2021-01-01"
+end_date   <- "2026-03-01"
+to_date    <- as.Date(end_date) + 1
+
+tickers <- c("NVDA", "COST")
+
+getSymbols(tickers, src = "yahoo", from = start_date, to = to_date,
+           auto.assign = TRUE)
+
+# Adjusted closing prices, merged on common dates
+prices <- na.omit(merge(Ad(NVDA), Ad(COST)))
+colnames(prices) <- tickers
+
+head(prices)
+tail(prices)
+```
+
+
+## 1.2 Daily and weekly log returns
+1.2 Compute the daily log returns and the weekly log returns for each
+stock.
+# Weekly log returns: take the last adjusted close of each week, then difference the logs
+> **1.2** Compute the daily log returns and the weekly log returns for each stock.
+
+
+```{r pressure, echo=FALSE}
+ret_d <- na.omit(diff(log(prices)))
+
+prices_w <- apply.weekly(prices, function(x) last(x))
+ret_w <- na.omit(diff(log(prices_w)))
+
+head(ret_d)
+tail(ret_d)
+head(ret_w)
+tail(ret_w)
+```
+
+
+
+## 1.3 Daily adjusted closing prices of both stocks
+1.3 Plot the daily adjusted closing price of both stocks in a single time
+series graph. Briefly describe the overall price trend of the two stocks.
+
+
+
+Both stocks rose over the sample period. COST climbed steadily from about $358 to about $1,008 (2.8 times its starting price), peaking near $1,050 in early 2025 and moving sideways since. NVDA went from about $13 to about $177 (13.5 times), but almost all of that gain came after 2023, with a more volatile path. On this raw price scale NVDA looks almost flat only because COST trades at a much higher price level, so the percentage growth (see 1.10) is the fairer comparison.
+
+```{r}
+
+plot(zoo(prices[, "NVDA"]), col = "darkgreen", lwd = 1.5,
+     ylim = range(prices), xlab = "Date", ylab = "Adjusted Close (USD)",
+     main = "Daily Adjusted Closing Prices: NVDA vs COST")
+lines(zoo(prices[, "COST"]), col = "blue", lwd = 1.5)
+legend("topleft", legend = tickers, col = c("darkgreen", "blue"),
+       lwd = 2, bty = "n")
+```
+```{r}
+tot <- as.numeric(last(prices)) / as.numeric(first(prices))
+names(tot) <- tickers
+```
+
+## 1.4 Histograms of daily and weekly log returns
+1.4 Visualize the distribution of the log returns using the hist() function. Use
+the par() function to place four histograms in one figure: daily returns
+for both stocks and weekly returns for both stocks.
+
+All four histograms are centered close to zero. The daily returns are sharply peaked around zero with a few observations far out in the tails, especially for NVDA (extreme days near -0.19 and +0.22). The weekly returns are wider and look closer to a bell shape, because daily noise is averaged over a week, but they still show a few outliers. NVDA's distributions are clearly wider than COST's in both frequencies, which shows its higher volatility.
+
+```{r fig.height=7}
+par(mfrow = c(2, 2))
+hist(coredata(ret_d[, "NVDA"]), breaks = 50, col = "lightgreen", border = "white",
+     main = "NVDA Daily Log Returns", xlab = "Log return")
+hist(coredata(ret_d[, "COST"]), breaks = 50, col = "lightblue", border = "white",
+     main = "COST Daily Log Returns", xlab = "Log return")
+hist(coredata(ret_w[, "NVDA"]), breaks = 30, col = "lightgreen", border = "white",
+     main = "NVDA Weekly Log Returns", xlab = "Log return")
+hist(coredata(ret_w[, "COST"]), breaks = 30, col = "lightblue", border = "white",
+     main = "COST Weekly Log Returns", xlab = "Log return")
+par(mfrow = c(1, 1))
+```
+## 1.5 First four moments of daily log returns
+1.5 Calculate the first four moments (mean, variance, skewness, kurtosis) of
+the daily log returns for each stock. Store the results in a data frame
+and present them in a table.
+
+The table reports the mean, variance, skewness and kurtosis of the daily log returns. Skewness and kurtosis are computed from standardized central moments. Kurtosis is the raw value (a normal distribution has 3), and excess kurtosis is kurtosis minus 3.
+
+
+```{r}
+moment_stats <- function(x) {
+  x  <- as.numeric(x)
+  m  <- mean(x)
+  v  <- var(x)
+  n  <- length(x)
+  s  <- sqrt(sum((x - m)^2) / n)          # population sd for standardizing
+  sk <- sum((x - m)^3) / n / s^3
+  ku <- sum((x - m)^4) / n / s^4
+  c(Mean = m, Variance = v, Skewness = sk, Kurtosis = ku, `Excess Kurtosis` = ku - 3)
+}
+
+moments_df <- data.frame(
+  Stock = tickers,
+  t(sapply(tickers, function(tk) moment_stats(ret_d[, tk]))),
+  row.names = NULL, check.names = FALSE
+)
+
+kable(moments_df, digits = 6, caption = "First four moments of daily log returns")
+```
+## 1.6 Interpretation
+
+1.6 Interpret the results from Question 1.5. Discuss which stock appears more
+volatile and whether the return distribution suggests frequent large gains
+or losses.
+
+**Volatility.** NVDA is the more volatile stock. Its daily standard deviation is about 3.24%, compared with about 1.42% for COST.
+
+**Mean.** NVDA also had the higher average daily log return (0.202% vs. 0.080%), consistent with higher risk being rewarded with higher return in this sample.
+
+**Skewness.** NVDA's skewness (0.23) is slightly positive, so its distribution is close to symmetric with a mild lean toward large gains. COST's skewness (-0.81) is clearly negative, meaning its extreme moves are more often large losses than large gains.
+
+**Kurtosis.** Both stocks have kurtosis well above 3 (NVDA 6.66, COST 11.86), so large gains and losses occur much more often than a normal distribution would predict. COST has the fatter tails despite lower overall volatility: it is usually calm but prone to occasional sharp moves.
+
+**Conclusion.** NVDA is riskier on a day-to-day basis, while COST's risk is concentrated in rare, large downside shocks. For both stocks the return distribution suggests frequent extreme events, so normal-distribution assumptions would understate tail risk.
+
+```{r}
+mv  <- setNames(moments_df$Variance, moments_df$Stock)
+msk <- setNames(moments_df$Skewness, moments_df$Stock)
+mku <- setNames(moments_df$Kurtosis, moments_df$Stock)
+more_vol <- names(which.max(mv))
+mv
+msk
+mku
+more_vol
+```
+
+## 1.7 Correlation of daily log returns
+1.7 Calculate the correlation between the daily log returns of the two stocks.
+Interpret whether the two stocks tend to move together strongly, weakly,
+or independently.
+
+The correlation between the daily log returns of NVDA and COST is 0.36, a weak-to-moderate positive relationship. The stocks tend to move in the same direction on market-wide days, but only loosely. About 13% of the variation in one is explained by the other ($0.36^2 \approx 0.13$), so most of each stock's movement comes from its own factors. They are neither strongly linked nor independent, which leaves room for diversification.
+
+```{r}
+cor_d <- cor(ret_d[, 1], ret_d[, 2])
+cor_d
+```
+
+
+## 1.8 Equally weighted portfolio
+1.8 Construct an equally weighted portfolio consisting of the two stocks.
+Compute the portfolio’s daily log return series.
+
+The portfolio is 50% NVDA and 50% COST, rebalanced daily. Its daily log return is $\ln(0.5e^{r_1} + 0.5e^{r_2})$, which accounts for the fact that log returns do not average linearly.
+
+$$ r_{p,t} = \ln\left(0.5\,e^{r_{1,t}} + 0.5\,e^{r_{2,t}}\right). $$
+```{r}
+w <- c(0.5, 0.5)
+port_ret <- xts(log(as.numeric(exp(ret_d) %*% w)), order.by = index(ret_d))
+colnames(port_ret) <- "Portfolio"
+head(port_ret)
+```
+## 1.9 Portfolio vs. individual stocks
+1.9 Compare the mean return and variance of the portfolio with those of
+the individual stocks. Does diversification appear to reduce risk?
+
+**Mean return.** The portfolio's mean daily log return (0.152%) lies between COST's (0.080%) and NVDA's (0.202%), as expected for a blend. It is slightly above the simple average of the two means (0.141%), which comes from daily rebalancing.
+
+**Variance and risk.** The portfolio variance (0.000398) is about 62% lower than NVDA's (0.001050) and below the simple average of the two variances (0.000627). This is the diversification effect: because the correlation is only 0.36, the stocks' ups and downs partly offset each other. The portfolio variance is still higher than COST's (0.000203), so it is not less risky than the safest stock. Its daily standard deviation of 2.0% sits between COST's 1.4% and NVDA's 3.2%.
+
+**Does diversification reduce risk?** Yes. Compared with holding NVDA alone, the portfolio cuts risk substantially while keeping a large share of NVDA's return. Return per unit of risk (mean divided by standard deviation) is highest for the portfolio (0.076, versus 0.062 for NVDA and 0.056 for COST), so the combination is more efficient than either stock alone. COST alone remains the lowest-risk choice, but it gives up much of the return.
+
+```{r}
+all_ret <- merge(ret_d, port_ret)
+
+compare_df <- data.frame(
+  Asset    = colnames(all_ret),
+  Mean     = sapply(all_ret, function(x) mean(x)),
+  Variance = sapply(all_ret, function(x) var(x)),
+  StdDev   = sapply(all_ret, function(x) sd(x)),
+  row.names = NULL
+)
+kable(compare_df, digits = 6, caption = "Mean and variance: individual stocks vs. portfolio")
+```
+
+```{r}
+pv <- compare_df$Variance[compare_df$Asset == "Portfolio"]
+vols <- compare_df$Variance[compare_df$Asset %in% tickers]
+names(vols) <- tickers
+```
+
+
+## 1.10 Cumulative growth of $100
+1.10 Compute and plot the cumulative growth of $100 invested in each
+stock and in the equally weighted portfolio from 2021-01-01 to 2026-03
+01. Briefly comment on which investment performed best over the sample
+period.
+
+**Best performer.** NVDA performed best. $100 grew to about $1,355 (13.6 times), well ahead of the equally weighted portfolio at $716 (7.2 times) and COST at $281 (2.8 times).
+
+**Pattern.** 
+NVDA led in late 2021, then fell below both COST and the portfolio during 2022, and pulled far ahead from early 2023 onward, with large swings along the way (including a sharp drop in spring 2025). COST grew slowly and steadily.NVDA fell back to the others at the end of 2022, then pulled far ahead from 2023 onward, with large swings along the way (including a sharp drop in early 2025). COST grew slowly and steadily.
+
+**Portfolio.** It ended between the two stocks, with a smoother path than NVDA. Its final value is below the simple average of the two ($818) because daily rebalancing to 50/50 sells winners and buys laggards.
+
+**Takeaway.** NVDA gave the highest terminal wealth but with the most risk. The portfolio kept a large share of the gains with smaller swings, which supports the diversification result in 1.9.
+
+```{r}
+growth <- 100 * exp(cumsum(all_ret))   # cumulative log returns -> growth of $100
+# prepend the starting value of 100
+start_row <- xts(matrix(100, nrow = 1, ncol = ncol(growth),
+                        dimnames = list(NULL, colnames(growth))),
+                 order.by = index(growth)[1] - 1)
+growth <- rbind(start_row, growth)
+
+cols <- c("darkgreen", "blue", "red")
+plot(zoo(growth[, 1]), col = cols[1], lwd = 1.5, ylim = range(growth),
+     xlab = "Date", ylab = "Value of $100 investment (USD)",
+     main = "Cumulative Growth of $100 (2021-01-01 to 2026-03-01)")
+lines(zoo(growth[, 2]), col = cols[2], lwd = 1.5)
+lines(zoo(growth[, 3]), col = cols[3], lwd = 1.5)
+abline(h = 100, lty = 3, col = "grey50")
+legend("topleft", legend = colnames(growth), col = cols, lwd = 2, bty = "n")
+
+final_vals <- round(as.numeric(last(growth)), 2)
+names(final_vals) <- colnames(growth)
+kable(data.frame(Investment = names(final_vals), `Final Value ($)` = final_vals,
+                 check.names = FALSE), row.names = FALSE)
+```
+
+---
+
+# Question 2: Extreme Market Movements (Tail Risk)
+
+## 2.1 New stock and extreme returns
+2.1 Choosing a new stock from the list, (download the daily adj. losing price
+during the same time period), find the daily log return, identify all trading
+days where the absolute daily log return exceeds 3 times the standard
+deviation of the return series.
+
+I choose **TSLA**, a stock known for large price moves.
+```{r}
+getSymbols("TSLA", src = "yahoo", from = start_date, to = to_date, auto.assign = TRUE)
+tsla_price <- na.omit(Ad(TSLA))
+colnames(tsla_price) <- "TSLA"
+
+tsla_ret <- na.omit(diff(log(tsla_price)))
+colnames(tsla_ret) <- "TSLA"
+
+mu_t    <- mean(tsla_ret)
+sigma_t <- sd(tsla_ret)
+threshold <- 3 * sigma_t
+
+c(mean = mu_t, sd = sigma_t, `3 sd threshold` = threshold)
+
+# Absolute daily log return exceeds 3 * sd
+extreme <- tsla_ret[abs(tsla_ret) > threshold]
+```
+## 2.2 Table of extreme returns
+2.2 Report the dates and values of those extreme returns in a table.
+
+```{r}
+extreme_df <- data.frame(Date = index(extreme),
+                         `Log Return` = as.numeric(extreme),
+                         `Number of SDs` = as.numeric(extreme) / sigma_t,
+                         check.names = FALSE)
+kable(extreme_df, digits = 4, row.names = FALSE,
+      caption = "TSLA days with |daily log return| > 3 standard deviations")
+```
+## 2.3 Proportion of observations beyond ±3σ
+
+2.3 Calculate the proportion of observations that exceed the ±3σ threshold.
+
+TSLA's daily log returns have a standard deviation of 3.77%, so the threshold is about 11.3% in a single day. Of 1,293 trading days, 17 exceeded it (8 large gains and 9 large losses), a proportion of 1.31%.
+
+```{r}
+n_total   <- length(tsla_ret)
+n_extreme <- nrow(extreme_df)
+prop_emp  <- n_extreme / n_total
+
+c(`Total observations` = n_total, `Extreme days` = n_extreme, Proportion = prop_emp)
+```
+## 2.4 Comparison with the normal distribution
+2.4 Compare your result with the theoretical probability under a normal dis
+tribution. Does the stock appear to experience more extreme events than
+predicted by a normal distribution?
+
+Under a normal distribution, only about 0.27% of days (about 3.5 of 1,293) should fall beyond 3 standard deviations. TSLA has 17 such days (1.31%), roughly 4.9 times the theoretical frequency. Several moves exceed 4 and 5 standard deviations (for example +20.5% on 2025-04-09, which is 5.4 standard deviations), which a normal distribution would essentially rule out. TSLA therefore shows fat tails: extreme gains and losses happen much more often than the normal model predicts. The extremes also cluster in time (six of them in 2024), suggesting that volatility comes in bursts.
+
+```{r}
+prop_norm <- 2 * pnorm(-3)   # P(|Z| > 3)
+data.frame(Source = c("Empirical (TSLA)", "Normal distribution"),
+           Proportion = c(prop_emp, prop_norm),
+           `Expected number of days` = c(n_extreme, prop_norm * n_total),
+           check.names = FALSE)
+```
+
+
+## 2.5 Why extreme returns matter
+2.5 Briefly explain why identifying extreme returns is important for investors
+and risk management.
+
+Extreme returns drive much of the real losses (and gains) investors experience, and they occur more often than normal-distribution models suggest. Identifying them matters because:
+
+- Risk measures that assume normality (such as Gaussian VaR) can badly understate tail risk, so position sizes, stop-loss rules and capital buffers may be too small.
+- Large losses can trigger margin calls, forced liquidations and breaches of risk limits, and a single extreme day can erase months of gains.
+- Stress testing, scenario analysis and tail-aware measures (Expected Shortfall, fat-tailed models, options hedging) depend on knowing how large and how frequent extremes are.
+- Extremes tend to cluster around news and market stress, which informs event-risk management and diversification decisions.
+
+
+---
+
+# Question 3: Simulating a Stock Return Distribution
+
+## 3.1 Simulate 10,000 normal returns
+3.1 Using the mean and standard deviation of the daily log return of one se
+lected stock, generate 10,000 simulated returns from a normal distribution
+using the function rnorm().
+
+
+I use the daily log returns of **NVDA** from Question 1.
+```{r}
+nvda_ret <- as.numeric(ret_d[, "NVDA"])
+mu_n    <- mean(nvda_ret)
+sigma_n <- sd(nvda_ret)
+
+sim_ret <- rnorm(10000, mean = mu_n, sd = sigma_n)
+```
+## 3.2 Histogram of simulated returns
+3.2 Plot a histogram of the simulated returns.
+
+```{r}
+hist(sim_ret, breaks = 60, col = "grey70", border = "white",
+     main = "Simulated NVDA Daily Returns (Normal, n = 10,000)",
+     xlab = "Log return")
+```
+## 3.3 Actual vs. simulated returns
+
+3.3 Plot the histogram of the actual daily log returns and compare it with the
+simulated distribution.
+
+The simulated returns form a smooth, symmetric bell curve with very few observations beyond 0.10 in either direction. The actual NVDA returns have a noticeably higher peak around zero, fewer moderate moves in the shoulders (roughly 0.03 to 0.06 from the mean), and occasional extreme observations in the tails that the simulated data do not reproduce. Although both distributions share the same mean and standard deviation, the actual returns are more peaked and fat-tailed than a normal distribution.
+
+```{r}
+xlim_rng <- range(c(nvda_ret, sim_ret))
+brks <- seq(xlim_rng[1], xlim_rng[2], length.out = 61)
+
+par(mfrow = c(2, 1))
+hist(nvda_ret, breaks = brks, col = "lightgreen", border = "white", freq = FALSE,
+     main = "Actual NVDA Daily Log Returns", xlab = "Log return")
+curve(dnorm(x, mu_n, sigma_n), add = TRUE, col = "red", lwd = 2)
+hist(sim_ret, breaks = brks, col = "grey70", border = "white", freq = FALSE,
+     main = "Simulated Returns (Normal)", xlab = "Log return")
+curve(dnorm(x, mu_n, sigma_n), add = TRUE, col = "red", lwd = 2)
+par(mfrow = c(1, 1))
+
+# Overlay on one plot for direct comparison
+hist(nvda_ret, breaks = brks, freq = FALSE, col = rgb(0, 0.6, 0, 0.4), border = "white",
+     main = "Actual (green) vs. Simulated (grey) Daily Log Returns", xlab = "Log return")
+hist(sim_ret, breaks = brks, freq = FALSE, col = rgb(0.4, 0.4, 0.4, 0.4),
+     border = "white", add = TRUE)
+legend("topright", legend = c("Actual", "Simulated"),
+       fill = c(rgb(0, 0.6, 0, 0.4), rgb(0.4, 0.4, 0.4, 0.4)), bty = "n")
+```
+
+
+## 3.4 Mean and variance comparison
+3.4 Calculate the mean and variance of the simulated returns and compare
+them with the sample mean and variance of the real return data.
+
+
+The simulated mean and variance are very close to the sample values, as expected because the simulation used the sample mean and standard deviation as inputs. The small differences are random sampling noise from `rnorm()`. The differences that matter are in the other rows: the actual minimum and maximum are much more extreme, the actual skewness is positive while the simulated skewness is about zero, and the actual kurtosis is more than double the simulated value (which is close to 3).
+
+```{r}
+comp <- data.frame(
+  Statistic = c("Mean", "Variance", "Std. Dev.", "Min", "Max", "Skewness", "Kurtosis"),
+  Actual = c(mean(nvda_ret), var(nvda_ret), sd(nvda_ret), min(nvda_ret), max(nvda_ret),
+             moment_stats(nvda_ret)["Skewness"], moment_stats(nvda_ret)["Kurtosis"]),
+  Simulated = c(mean(sim_ret), var(sim_ret), sd(sim_ret), min(sim_ret), max(sim_ret),
+                moment_stats(sim_ret)["Skewness"], moment_stats(sim_ret)["Kurtosis"])
+)
+kable(comp, digits = 6, caption = "Actual vs. simulated NVDA daily log returns")
+```
+## 3.5 Is the normal distribution a good model?
+
+3.5 Based on your comparison, discuss whether the normal distribution ap
+pears to be a good model for stock returns.
+
+The simulated returns closely match the real data in mean (`r round(mean(sim_ret), 4)` vs. `r round(mean(nvda_ret), 4)`) and variance (`r round(var(sim_ret), 5)` vs. `r round(var(nvda_ret), 5)`), which is expected because the simulation used the sample mean and standard deviation as inputs. However, the normal model fails to reproduce the shape of the real distribution. The actual returns have kurtosis of `r round(moment_stats(nvda_ret)["Kurtosis"], 2)` versus about 3 for the simulated data, and their minimum (`r round(100*min(nvda_ret), 1)`%) and maximum (`r round(100*max(nvda_ret), 1)`%) are far more extreme than the simulated values (`r round(100*min(sim_ret), 1)`% and `r round(100*max(sim_ret), 1)`%). The real data also show positive skewness (`r round(moment_stats(nvda_ret)["Skewness"], 2)`), while the normal distribution is symmetric. The histograms confirm this: the actual returns have a higher peak and heavier tails.
+
+**Conclusion.** The normal distribution is a reasonable approximation for the center of the return distribution and for the first two moments, but it is not a good model for stock returns overall. It underestimates the frequency of extreme gains and losses, so risk measures based on it (such as Gaussian VaR) would understate tail risk. A fat-tailed model such as the Student-t distribution, a GARCH model, or historical simulation would be more appropriate.

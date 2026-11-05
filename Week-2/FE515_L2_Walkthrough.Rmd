@@ -1,0 +1,755 @@
+---
+title: "FE 515: Lecture 2 Walkthrough"
+subtitle: "Using R to Compare Investments"
+author: "Sean O'Leary"
+date: "September 10, 2026"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+# Lecture Goal
+
+In the first lecture, we introduced enough R syntax to store data, work with vectors and data frames, use functions, and calculate returns.
+
+Today, we are going to solve a realistic problem. 
+
+Suppose you are a junior analyst and are given historical price data for two investments:
+
+- an equity investment,
+- a bond investment.
+
+An investor has **$10,000** and wants to know what would have happened if they had invested the money in:
+
+1. the equity investment,
+2. the bond investment,
+3. a 60/40 portfolio containing 60% equity and 40% bonds.
+
+Our job is to use the data to answer:
+
+> **Which investment produced the strongest performance, and what risk did the investor experience along the way?**
+
+The workflow for today's analysis will be:
+
+$$
+\text{Raw Data}
+\rightarrow
+\text{Inspect}
+\rightarrow
+\text{Returns}
+\rightarrow
+\text{Portfolio}
+\rightarrow
+\text{Wealth}
+\rightarrow
+\text{Risk}
+\rightarrow
+\text{Decision}
+$$
+
+# Importing the Data
+
+## Problem Description
+
+Before doing any financial calculation, we need to understand the data we were given.
+
+The file `FE515_L2_Investment_Data.csv` contains three variables:
+
+- `Date`
+- `Equity`
+- `Bond`
+
+The equity and bond columns contain price levels.
+
+A common mistake in financial analysis is to immediately begin calculations without first inspecting the dataset. Before using the data, we should ask:
+
+- Did R read the file correctly?
+- How many observations do we have?
+- What type of object is each column?
+- Are there missing values?
+- Do the prices appear reasonable?
+
+We begin by importing the file.
+
+```{r import-data}
+data <- read.csv("FE515_L2_Investment_Data.csv")
+```
+
+Now inspect the first few observations.
+
+```{r inspect-head}
+head(data)
+```
+
+We can also inspect the structure of the dataset.
+
+```{r inspect-structure}
+str(data)
+```
+
+And check the dimensions.
+
+```{r inspect-dimensions}
+dim(data)
+```
+
+The `dim()` function returns:
+
+$$
+(\text{number of rows},\ \text{number of columns})
+$$
+
+Finally, check whether any observations are missing.
+
+```{r inspect-missing}
+colSums(is.na(data))
+```
+
+### Quick Check
+
+Before moving forward:
+
+1. What does each row represent?
+2. What does each column represent?
+3. Does R currently recognize `Date` as a date?
+4. Why is checking for missing values important before computing returns?
+
+# Working With Dates
+
+## Problem Description
+
+The `Date` column was imported from a CSV file.
+
+CSV files store text and numbers, but they do not automatically preserve special R object types. Therefore, R may initially treat the dates as character strings.
+
+For financial time series, we want R to understand that these observations occur in chronological order.
+
+We can convert the column using:
+
+```{r convert-date}
+data$Date <- as.Date(data$Date)
+```
+
+Check the structure again.
+
+```{r inspect-date}
+str(data)
+```
+
+Now R recognizes each observation as an actual calendar date.
+
+This matters because dates can now be used naturally for:
+
+- plotting,
+- sorting,
+- filtering,
+- identifying particular market periods.
+
+For example:
+
+```{r date-range}
+min(data$Date)
+max(data$Date)
+```
+
+# From Prices to Returns
+
+## Problem Description
+
+Price levels tell us how much an asset costs, but they do not directly tell us how well the investment performed.
+
+If an asset moves from price \(P_{t-1}\) to price \(P_t\), its **simple return** is
+
+$$
+r_t = \frac{P_t-P_{t-1}}{P_{t-1}}.
+$$
+
+This can also be written as
+
+$$
+r_t = \frac{P_t}{P_{t-1}}-1.
+$$
+
+For example, if a stock rises from $100 to $103,
+
+$$
+r_t = \frac{103}{100}-1 = 0.03.
+$$
+
+The investor earned a 3% return.
+
+In Lecture 1, we also worked with continuously compounded, or log, returns:
+
+$$
+r_t^{\log} = \log(P_t)-\log(P_{t-1}).
+$$
+
+Both are useful. Today we will use **simple returns** because they have a particularly convenient interpretation when constructing portfolios and tracking investment value.
+
+## Translating the Formula Into R
+
+Suppose we have the price vector
+
+$$
+P_1,P_2,\ldots,P_n.
+$$
+
+To compute returns, we need to compare
+
+$$
+P_2,\ldots,P_n
+$$
+
+with
+
+$$
+P_1,\ldots,P_{n-1}.
+$$
+
+In R, we can create those two vectors by removing the first or last observation.
+
+```{r demonstrate-indexing}
+n <- nrow(data)
+
+data$Equity[-1][1:5]
+data$Equity[-n][1:5]
+```
+
+Now implement the return formula directly.
+
+```{r calculate-returns}
+equity_return <- data$Equity[-1] / data$Equity[-n] - 1
+bond_return   <- data$Bond[-1]   / data$Bond[-n]   - 1
+```
+
+Inspect the first several returns.
+
+```{r inspect-returns}
+head(equity_return)
+head(bond_return)
+```
+
+Because a return requires **two prices**, \(n\) prices produce only \(n-1\) returns.
+
+```{r return-lengths}
+length(data$Equity)
+length(equity_return)
+```
+
+The first return corresponds to the second date in the original dataset.
+
+```{r return-dates}
+return_dates <- data$Date[-1]
+head(return_dates)
+```
+
+### Quick Check
+
+If there are 250 price observations, how many daily returns should there be?
+
+Why?
+
+# Constructing a 60/40 Portfolio
+
+## Problem Description
+
+The investor does not necessarily need to choose only one asset.
+
+Suppose the portfolio places:
+
+$$
+w_E = 0.60
+$$
+
+in equity and
+
+$$
+w_B = 0.40
+$$
+
+in bonds.
+
+For a two-asset portfolio, the one-period portfolio return is
+
+$$
+r_{p,t}
+=
+w_E r_{E,t}
++
+w_B r_{B,t}.
+$$
+
+More generally,
+
+$$
+r_{p,t}
+=
+\sum_{i=1}^{N} w_i r_{i,t},
+$$
+
+where the portfolio weights satisfy
+
+$$
+\sum_{i=1}^{N} w_i = 1.
+$$
+
+For our 60/40 portfolio,
+
+$$
+r_{p,t}
+=
+0.60r_{E,t}
++
+0.40r_{B,t}.
+$$
+
+This tells us something useful about R: once returns are stored as vectors, the mathematical portfolio formula can be translated almost directly into code.
+
+```{r portfolio-return}
+portfolio_return <- 0.60 * equity_return + 0.40 * bond_return
+```
+
+Inspect the first few portfolio returns.
+
+```{r inspect-portfolio-returns}
+head(portfolio_return)
+```
+
+To verify the calculation manually, compare the first portfolio return with the formula.
+
+```{r verify-portfolio-return}
+0.60 * equity_return[1] + 0.40 * bond_return[1]
+portfolio_return[1]
+```
+
+These should be identical.
+
+**Important assumption:** this calculation treats the portfolio as being returned to 60% equity and 40% bonds each period. In other words, it represents a regularly rebalanced 60/40 strategy. We will study portfolio mechanics in more detail later in the course.
+
+### Quick Check
+
+Suppose on one day:
+
+$$
+r_E = 2\%, \qquad r_B = -0.5\%.
+$$
+
+Without using R, what should the 60/40 portfolio return be?
+
+# Turning Returns Into Wealth
+
+## Problem Description
+
+Returns are useful, but the investor's question was not:
+
+> "What vector of returns would I have earned?"
+
+The investor wants to know:
+
+> **What happened to my $10,000?**
+
+Suppose the initial investment is
+
+$$
+V_0 = 10{,}000.
+$$
+
+After one period,
+
+$$
+V_1 = V_0(1+r_1).
+$$
+
+After two periods,
+
+$$
+V_2 = V_1(1+r_2)
+    = V_0(1+r_1)(1+r_2).
+$$
+
+After \(T\) periods,
+
+$$
+V_T
+=
+V_0
+\prod_{t=1}^{T}(1+r_t).
+$$
+
+This is the effect of compounding.
+
+If returns are
+
+$$
+r_1,r_2,\ldots,r_T,
+$$
+
+we therefore need the sequence
+
+$$
+(1+r_1),\,
+(1+r_1)(1+r_2),\,
+\ldots,\,
+\prod_{t=1}^{T}(1+r_t).
+$$
+
+R has a function designed for cumulative products:
+
+```r
+cumprod()
+```
+
+For example:
+
+```{r cumprod-example}
+example_returns <- c(0.10, -0.05, 0.02)
+cumprod(1 + example_returns)
+```
+
+Now apply the same idea to our investments.
+
+```{r wealth-paths}
+initial_investment <- 10000
+
+equity_wealth <- c(
+  initial_investment,
+  initial_investment * cumprod(1 + equity_return)
+)
+
+bond_wealth <- c(
+  initial_investment,
+  initial_investment * cumprod(1 + bond_return)
+)
+
+portfolio_wealth <- c(
+  initial_investment,
+  initial_investment * cumprod(1 + portfolio_return)
+)
+```
+
+We include the initial $10,000 as the first observation so the wealth vectors have the same number of observations as our dates.
+
+```{r wealth-length-check}
+length(data$Date)
+length(equity_wealth)
+```
+
+Now look at the ending values.
+
+```{r ending-values}
+tail(equity_wealth, 1)
+tail(bond_wealth, 1)
+tail(portfolio_wealth, 1)
+```
+
+These values answer our first major financial question:
+
+> If we invested $10,000 at the beginning of the sample, how much would each strategy be worth at the end?
+
+# Visualizing the Investment
+
+## Problem Description
+
+A final account value tells us where an investment ended.
+
+It does **not** tell us what happened along the way.
+
+Two investments could both finish at $11,000 while producing completely different experiences for the investor.
+
+We therefore want to see the entire wealth path.
+
+```{r wealth-plot, fig.width=9, fig.height=5}
+plot(
+  data$Date,
+  equity_wealth,
+  type = "l",
+  lwd = 2,
+  xlab = "Date",
+  ylab = "Portfolio Value ($)",
+  main = "Growth of a $10,000 Investment"
+)
+
+lines(data$Date, bond_wealth, lwd = 2, lty = 2)
+lines(data$Date, portfolio_wealth, lwd = 2, lty = 3)
+
+legend(
+  "topleft",
+  legend = c("Equity", "Bond", "60/40 Portfolio"),
+  lty = c(1, 2, 3),
+  lwd = 2
+)
+```
+
+The graph is doing more than making the analysis look attractive. It is helping us identify financial behavior that is difficult to see from a single number.
+
+# Measuring Drawdown
+
+## Problem Description
+
+Volatility is one way to describe risk, but investors often think about losses relative to their previous high.
+
+Suppose an investment reaches \$12,000 and later falls to \$10,800.
+
+Relative to its previous peak, the investment has fallen
+
+$$
+\frac{10{,}800}{12{,}000}-1
+=
+-0.10.
+$$
+
+This is a 10% **drawdown**.
+
+At each time \(t\), define the running peak as
+
+$$
+M_t
+=
+\max_{s\leq t} V_s.
+$$
+
+The drawdown is then
+
+$$
+D_t
+=
+\frac{V_t}{M_t}-1.
+$$
+
+A drawdown is zero whenever the investment is at a new high. It becomes negative when the investment falls below its previous peak.
+
+The **maximum drawdown** over the sample is
+
+$$
+\text{MDD}
+=
+\min_t D_t.
+$$
+
+Because drawdowns are negative, the minimum value represents the largest peak-to-trough loss.
+
+## Finding the Running Peak in R
+
+We need, for every date, the largest wealth value observed **up to that date**.
+
+R provides the function
+
+```r
+cummax()
+```
+
+which calculates a cumulative maximum.
+
+```{r drawdown-running-peak}
+portfolio_peak <- cummax(portfolio_wealth)
+
+head(portfolio_wealth)
+head(portfolio_peak)
+```
+
+Now calculate drawdown directly from the formula.
+
+```{r portfolio-drawdown}
+portfolio_drawdown <- portfolio_wealth / portfolio_peak - 1
+```
+
+Find the maximum drawdown.
+
+```{r maximum-drawdown}
+min(portfolio_drawdown)
+```
+
+To express it as a percentage:
+
+```{r maximum-drawdown-percent}
+100 * min(portfolio_drawdown)
+```
+
+We can also visualize the drawdown through time.
+
+```{r drawdown-plot, fig.width=9, fig.height=4.5}
+plot(
+  data$Date,
+  portfolio_drawdown,
+  type = "l",
+  lwd = 2,
+  xlab = "Date",
+  ylab = "Drawdown",
+  main = "60/40 Portfolio Drawdown"
+)
+
+abline(h = 0, lty = 2)
+```
+
+# Comparing All Three Investments
+
+## Problem Description
+
+We have now repeated several calculations for multiple investments.
+
+For each strategy, we would like to know:
+
+1. ending wealth,
+2. total return,
+3. average daily return,
+4. daily volatility,
+5. maximum drawdown.
+
+The total return from initial wealth \(V_0\) to final wealth \(V_T\) is
+
+$$
+R_{\text{total}}
+=
+\frac{V_T}{V_0}-1.
+$$
+
+Daily volatility is measured using the sample standard deviation of daily returns:
+
+$$
+\sigma_r
+=
+\sqrt{
+\frac{1}{n-1}
+\sum_{t=1}^{n}
+(r_t-\bar r)^2
+}.
+$$
+
+R already provides `mean()` and `sd()` for these calculations.
+
+For maximum drawdown, we repeat the formula from the previous section:
+
+$$
+\text{MDD}
+=
+\min_t
+\left(
+\frac{V_t}{\max_{s\leq t}V_s}-1
+\right).
+$$
+
+At this point, copying and rewriting the same code three times would be inefficient.
+
+This is a natural reason to create our own function.
+
+## Building a Reusable Summary Function
+
+```{r summary-function}
+investment_summary <- function(name, returns, wealth) {
+
+  total_return <- tail(wealth, 1) / wealth[1] - 1
+  average_return <- mean(returns)
+  volatility <- sd(returns)
+  max_drawdown <- min(wealth / cummax(wealth) - 1)
+
+  data.frame(
+    Investment = name,
+    Ending.Wealth = tail(wealth, 1),
+    Total.Return = total_return,
+    Average.Daily.Return = average_return,
+    Daily.Volatility = volatility,
+    Maximum.Drawdown = max_drawdown
+  )
+}
+```
+
+The function accepts three pieces of information:
+
+- a name,
+- a vector of returns,
+- a vector of wealth values.
+
+It returns one row containing the statistics we want.
+
+Now use the same tool for all three investments.
+
+```{r create-summary-table}
+equity_summary <- investment_summary(
+  "Equity",
+  equity_return,
+  equity_wealth
+)
+
+bond_summary <- investment_summary(
+  "Bond",
+  bond_return,
+  bond_wealth
+)
+
+portfolio_summary <- investment_summary(
+  "60/40 Portfolio",
+  portfolio_return,
+  portfolio_wealth
+)
+
+summary_table <- rbind(
+  equity_summary,
+  bond_summary,
+  portfolio_summary
+)
+
+summary_table
+```
+
+For easier reading, we can round the numeric values.
+
+```{r rounded-summary-table}
+summary_table$Ending.Wealth <- round(summary_table$Ending.Wealth, 2)
+summary_table$Total.Return <- round(100 * summary_table$Total.Return, 2)
+summary_table$Average.Daily.Return <- round(100 * summary_table$Average.Daily.Return, 3)
+summary_table$Daily.Volatility <- round(100 * summary_table$Daily.Volatility, 3)
+summary_table$Maximum.Drawdown <- round(100 * summary_table$Maximum.Drawdown, 2)
+
+names(summary_table) <- c(
+  "Investment",
+  "Ending Wealth ($)",
+  "Total Return (%)",
+  "Average Daily Return (%)",
+  "Daily Volatility (%)",
+  "Maximum Drawdown (%)"
+)
+
+summary_table
+```
+
+# Making the Investment Decision
+
+We can now return to the original assignment.
+
+The investor had $10,000 and asked us to compare:
+
+- equity,
+- bonds,
+- a 60/40 portfolio.
+
+We used R to move from raw price data to a financial comparison.
+
+Our workflow was:
+
+$$
+\text{Prices}
+\rightarrow
+\text{Returns}
+\rightarrow
+\text{Portfolio Returns}
+\rightarrow
+\text{Wealth}
+\rightarrow
+\text{Drawdown}
+\rightarrow
+\text{Comparison}
+$$
+
+The important point is not memorizing every R function that appeared today.
+
+Instead, notice how each function entered the analysis because we needed it to answer a financial question:
+
+- `read.csv()` because we needed to load data,
+- `str()` because we needed to understand the data,
+- `as.Date()` because the observations occur through time,
+- vector arithmetic because returns are mathematical transformations of prices,
+- `cumprod()` because investment wealth compounds,
+- `cummax()` because drawdown depends on the previous peak,
+- `plot()` because a full investment path contains information that a final value does not,
+- a user-defined function because we wanted to repeat the same analysis efficiently.
